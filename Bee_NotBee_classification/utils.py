@@ -17,7 +17,7 @@ from matplotlib import pyplot as plt
 from info import i, printb, printr, printp, print
 import muda
 import jams
-
+import soundfile as sf
 
 
 
@@ -51,7 +51,7 @@ def read_beeNotBee_annotations_saves_labels(audiofilename, block_name,  blockSta
     else :
         annotation_filename=audiofilename[0:-4]+'.lab'
         
-        
+        sf
     try:    
         with open(annotations_path + os.sep + annotation_filename,'r') as f:
             # EXAMPLE FILE:
@@ -151,20 +151,22 @@ def read_beeNotBee_annotations_saves_labels(audiofilename, block_name,  blockSta
 
 
 
-def uniform_block_size(undersized_block, block_size_samples, method='repeat' ):
+def uniform_block_size(undersized_block, block_size_samples, method='repeat'):
+    lengthToFill = block_size_samples - undersized_block.size
 
-    lengthTofill=(block_size_samples)-(undersized_block.size)
+    if lengthToFill < 0:
+        print("Warning: Attempting to pad a block with negative length; returning the original block.")
+        return undersized_block  # Return the original block if it exceeds the target size
+
     if method == 'zero_padding':
-        new_block=np.pad(undersized_block, (0,lengthTofill), 'constant', constant_values=(0) )
-
-    elif method=='mean_padding':
-        new_block=np.pad(undersized_block, (0,lengthTofill), 'mean' )
-    
-    elif method=='repeat':        
-        new_block= np.pad(undersized_block, (0,lengthTofill), 'reflect')
+        new_block = np.pad(undersized_block, (0, lengthToFill), 'constant', constant_values=(0))
+    elif method == 'mean_padding':
+        new_block = np.pad(undersized_block, (0, lengthToFill), 'mean')
+    elif method == 'repeat':        
+        new_block = np.pad(undersized_block, (0, lengthToFill), 'reflect')
     else:
-        print('methods to choose are: \'zero_padding\' ,\'mean_padding\' and \'repeat\' ' )
-        new_block=0
+        print('Methods to choose are: \'zero_padding\', \'mean_padding\', and \'repeat\'.')
+        new_block = 0
               
     return new_block
     
@@ -174,87 +176,82 @@ def uniform_block_size(undersized_block, block_size_samples, method='repeat' ):
 
      
 
-def load_audioFiles_saves_segments( audiofilenames_list, path_audioFiles,path_save_audio_labels, block_size , thresholds, annotations_path, read_beeNotBee_annotations ='yes', save_audioSegments='yes'):
-
+def load_audioFiles_saves_segments(audiofilenames_list, path_audioFiles, path_save_audio_labels, block_size, thresholds, annotations_path, read_beeNotBee_annotations='yes', save_audioSegments='yes'):
     
-    # audiofilenames_list = [os.path.basename(x) for x in glob.glob(path_audioFiles+'*.mp3')]
-    # audiofilenames_list.extend([os.path.basename(x) for x in glob.glob(path_audioFiles+'*.wav')])
+    printb("Number of audiofiles in folder: " + str(len(audiofilenames_list)))
     
-    printb("Number of audiofiles in folder: "+str(len(audiofilenames_list)))
-    
-    fi=0
+    fi = 0
     for file_name in audiofilenames_list:
-        fi=fi+1
+        fi += 1
         print('\n')
-        printb('Processing '+ file_name+'          :::file number:  '+str(fi)+' --------->of '+str(len(audiofilenames_list)))
-          
-
-        offset=0
-        block_id =0
+        printb('Processing ' + file_name + ' ::: file number: ' + str(fi) + ' ---------> of ' + str(len(audiofilenames_list)))
         
+        offset = 0
+        block_id = 0
         
-        while 1:
-                    
-            # READ ONE BLOCK OF THE AUDIO FILE
+        while True:
             try:
-                block,sr = librosa.core.load(path_audioFiles+file_name, offset=offset, duration=block_size)
-                print('-----------------Reading segment '+str(block_id))
-            except ValueError as e:
-                e
-                if 'Input signal length' in str(e):
-                    block=np.arange(0)
+                # Use soundfile for loading audio
+                with sf.SoundFile(path_audioFiles + file_name) as audio_file:
+                    sr = audio_file.samplerate
+                    audio_file.seek(int(offset * sr))  # Seek to the offset position
+                    block = audio_file.read(int(block_size * sr))  # Read block_size seconds of audio
+                    print('-----------------Reading segment ' + str(block_id))
+            except RuntimeError as e:
+                print(f"RuntimeError for {file_name}: {e}. Skipping this file.")
+                break
             except FileNotFoundError as e1:
                 print(e1, ' but continuing anyway')
-                
+                break
 
-            if block.shape[0] > 0:    #when total length = multiple of blocksize, results that last block is 0-lenght, this if bypasses those cases.
-                
-                block_name=file_name[0:-4]+'__segment'+str(block_id)
+            if len(block) > 0:  # Ensure the block is not empty
+                block_name = file_name[0:-4] + '__segment' + str(block_id)
                 print(block_name)
                 
-                # READ BEE NOT_BEE ANNOTATIONS:
+                # READ BEE NOT_BEE ANNOTATIONS
                 if read_beeNotBee_annotations == 'yes':
-                    print('---------------------Will read BeeNotbee anotations and create labels for segment'+str(block_id))
-                    blockStart=offset
-                    blockfinish=offset+block_size
+                    print('---------------------Will read BeeNotbee annotations and create labels for segment ' + str(block_id))
+                    blockStart = offset
+                    blockfinish = offset + block_size
                     
                     for th in thresholds:
-                    
-                        label_file_exists = os.path.isfile(path_save_audio_labels+'labels_BeeNotBee_th'+str(th)+'.csv')
-                        with open(path_save_audio_labels+'labels_BeeNotBee_th'+str(th)+'.csv','a', newline='') as label_file:
-                            writer =csv.DictWriter(label_file, fieldnames=['sample_name', 'segment_start','segment_finish', 'label_strength', 'label'], delimiter=',')
+                        label_file_exists = os.path.isfile(path_save_audio_labels + 'labels_BeeNotBee_th' + str(th) + '.csv')
+                        with open(path_save_audio_labels + 'labels_BeeNotBee_th' + str(th) + '.csv', 'a', newline='') as label_file:
+                            writer = csv.DictWriter(label_file, fieldnames=['sample_name', 'segment_start', 'segment_finish', 'label_strength', 'label'], delimiter=',')
                             if not label_file_exists:
                                 writer.writeheader()
                             
-                            label_block_th=read_beeNotBee_annotations_saves_labels(file_name, block_name,  blockStart, blockfinish, annotations_path, th)
-                                                       
-                            writer.writerow({'sample_name': block_name, 'segment_start': blockStart, 'segment_finish': blockfinish , 'label_strength': label_block_th[1],  'label': label_block_th[0]} )
-                            print('-----------------Wrote label for th '+ str(th)+' seconds of segment'+str(block_id)  ) 
+                            label_block_th = read_beeNotBee_annotations_saves_labels(file_name, block_name, blockStart, blockfinish, annotations_path, th)
+                            writer.writerow({'sample_name': block_name, 'segment_start': blockStart, 'segment_finish': blockfinish, 'label_strength': label_block_th[1], 'label': label_block_th[0]})
+                            print('-----------------Wrote label for th ' + str(th) + ' seconds of segment ' + str(block_id)) 
                     
-               
-                # MAKE BLOCK OF THE SAME SIZE:
-                if block.shape[0] < block_size*sr:   
-                    block = uniform_block_size(block, block_size*sr, 'repeat')
-                    print('-----------------Uniformizing block length of segment'+str(block_id)  ) 
-
-                        
-            
-                # Save audio segment:
-                if save_audioSegments=='yes' and (not os.path.exists(path_save_audio_labels+block_name+'.wav')): #saves only if option is chosen and if block file doesn't already exist.
-                    librosa.output.write_wav(path_save_audio_labels+block_name+'.wav', block, sr)
-                    print( '-----------------Saved wav file for segment '+str(block_id))
+                # Check length before uniformizing
+                target_length = block_size * sr
+                print(f"Block Length: {len(block)}, Target Length: {target_length}")  # Log the lengths
                 
-                    
-                    
-            else :
-                print('----------------- no more segments for this file--------------------------------------')
+                if len(block) < target_length:
+                    lengthToFill = target_length - len(block)
+                    if lengthToFill > 0:  # Only pad if there is a positive length to fill
+                        block = uniform_block_size(block, target_length, 'repeat')
+                        print('-----------------Uniformizing block length of segment ' + str(block_id)) 
+                    else:
+                        print('No need to pad the block, proceeding with the current block length.')
+
+                # Save audio segment
+                if save_audioSegments == 'yes' and not os.path.exists(path_save_audio_labels + block_name + '.wav'):
+                    sf.write(path_save_audio_labels + block_name + '.wav', block, sr)
+                    print('-----------------Saved wav file for segment ' + str(block_id))
+                
+            else:
+                print('-----------------No more segments for this file--------------------------------------')
                 print('\n')
                 break
             offset += block_size
             block_id += 1
+    
     printb('______________________________No more audioFiles___________________________________________________')
-       
-    return 
+    
+    return
 
     
 def read_HiveState_fromSampleName( filename, states):   #states: state_labels=['active','missing queen','swarm' ]
